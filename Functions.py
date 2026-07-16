@@ -6,6 +6,7 @@ from time import sleep
 def make_follow_following_data():
 
     InstaDataSyncer.get_acc_you_follow()
+    InstaDataSyncer.human_delay(2, 5)
     InstaDataSyncer.get_acc_following_you()
 
     acc_following_you = open(r'synced_data/acc_following_you.txt', 'r')
