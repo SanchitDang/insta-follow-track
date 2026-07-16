@@ -1,11 +1,13 @@
 import os
 import random
+import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from dotenv import load_dotenv
-import time
+
+from chrome_session import DEBUG_PORT
 
 load_dotenv()
 
@@ -13,6 +15,7 @@ load_dotenv()
 def human_delay(min_seconds, max_seconds):
     """Randomized pause so scraping activity doesn't have a fixed, bot-like cadence."""
     time.sleep(random.uniform(min_seconds, max_seconds))
+
 
 # Global configuration
 IG_BASE_URL = 'https://www.instagram.com/'
@@ -39,9 +42,9 @@ acc_following_you_file = r'synced_data/acc_following_you.txt'
 
 
 def setup_driver():
-    """Set up the WebDriver with debugging options."""
+    """Set up the WebDriver, attaching to the Chrome session opened via chrome_session.launch_chrome()."""
     options = webdriver.ChromeOptions()
-    options.add_experimental_option("debuggerAddress", "localhost:9222")
+    options.add_experimental_option("debuggerAddress", f"localhost:{DEBUG_PORT}")
     return webdriver.Chrome(options=options)
 
 

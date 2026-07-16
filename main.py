@@ -1,9 +1,9 @@
-import os
 import threading
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-import Functions
+import chrome_session
+import follow_actions
 
 
 class FirstPage(tk.Frame):
@@ -62,13 +62,10 @@ class FirstPage(tk.Frame):
             chrome_driver_with_head()
 
         def chrome_driver_headless():
-            # For Realtime program
-            # os.system("zOpenDevChromeHeadless.vbs")
-            # For Debugging
-            os.system("zOpenDevChrome.vbs")
+            chrome_session.launch_chrome(headless=True)
 
         def chrome_driver_with_head():
-            os.system("zOpenDevChrome.vbs")
+            chrome_session.launch_chrome(headless=False)
 
         def exit_program_function():
             app.destroy()
@@ -224,8 +221,7 @@ class SecondPage(tk.Frame):
 
         def sync_data():
             my_progress.start(10)
-            Functions.make_follow_following_data()
-            # get_profile_pic_thumbnail.get_image()
+            follow_actions.make_follow_following_data()
             my_progress.stop()
 
         def see_not_following_back():
@@ -235,7 +231,7 @@ class SecondPage(tk.Frame):
 
         def unfollow_ppl():
             my_progress.start(10)
-            Functions.unfollow_people()
+            follow_actions.unfollow_people()
             my_progress.stop()
 
         def unfollow_button_by_id():
