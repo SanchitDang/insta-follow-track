@@ -1,269 +1,317 @@
+import os
 import threading
 import tkinter as tk
-from tkinter import ttk
+
+import ttkbootstrap as ttkb
+from ttkbootstrap.dialogs import Messagebox
 from PIL import Image, ImageTk
+
 import chrome_session
 import follow_actions
 
+APP_TITLE = "Instagram Follow Tracker"
+THEME = "darkly"
+FONT_FAMILY = "Segoe UI"
+HEADER_FONT = (FONT_FAMILY, 18, "bold")
+SUBHEADER_FONT = (FONT_FAMILY, 10)
+SECTION_FONT = (FONT_FAMILY, 11, "bold")
 
-class FirstPage(tk.Frame):
+NOT_FOLLOWING_BACK_FILE = r'synced_data/not_following_back.txt'
+ACC_YOU_FOLLOW_FILE = r'synced_data/acc_you_follow.txt'
+ACC_FOLLOWING_YOU_FILE = r'synced_data/acc_following_you.txt'
+
+
+def run_async(widget, func, on_done=None):
+    """Run func() on a background thread; on_done(result) is invoked back on
+    the Tk main thread once finished, so callers can safely touch widgets."""
+    def worker():
+        result = func()
+        if on_done:
+            widget.after(0, lambda: on_done(result))
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def count_lines(path):
+    try:
+        with open(path, 'r') as f:
+            return sum(1 for _ in f)
+    except FileNotFoundError:
+        return None
+
+
+def load_logo(parent, max_width=260, tint="#E8E8E8"):
+    """Load the wordmark, recolored to `tint` (it's a dark mark that's nearly
+    invisible on the dark theme's background otherwise)."""
+    img = Image.open('resource_data/logo.png').convert('RGBA')
+    ratio = max_width / img.width
+    img = img.resize((max_width, int(img.height * ratio)))
+    if tint:
+        solid = Image.new('RGBA', img.size, tint)
+        solid.putalpha(img.split()[3])
+        img = solid
+    photo = ImageTk.PhotoImage(img)
+    label = ttkb.Label(parent, image=photo)
+    label.image = photo
+    return label
+
+
+class SessionPage(ttkb.Frame):
+    """Entry page: open a debuggable Chrome session, then continue to the dashboard."""
+
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent, padding=24)
 
-        # Logo
-        img = Image.open('resource_data/logo.png')
-        # img = img.resize((200, 100))
-        logo = ImageTk.PhotoImage(img)
-        logo_label = tk.Label(self, image=logo)
-        logo_label.image = logo
+        load_logo(self).pack(pady=(0, 8))
+        ttkb.Label(self, text=APP_TITLE, font=HEADER_FONT).pack()
+        ttkb.Label(
+            self, text="Find and unfollow accounts that don't follow you back.",
+            font=SUBHEADER_FONT, bootstyle="secondary"
+        ).pack(pady=(0, 20))
 
-        # Labels
-        label1 = tk.Label(self, text="If you are logged in", font="Times", padx=56.5)
-        label2 = tk.Label(self, text="If you are not logged in", font="Times")
-        label3 = tk.Label(self, text="Open Session", font="Times")
+        step1 = ttkb.Labelframe(self, text="Step 1 - Open a Chrome session", padding=16)
+        step1.pack(fill="x", pady=(0, 16))
+        ttkb.Label(
+            step1, text="Log into Instagram in the window that opens. This is remembered\n"
+                        "for future runs, so you only need to do it again if you sign out.",
+            justify="left"
+        ).pack(anchor="w", pady=(0, 12))
 
-        # Buttons
-        button1 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: logged_in_windows())
+        btn_row = ttkb.Frame(step1)
+        btn_row.pack(fill="x")
+        ttkb.Button(
+            btn_row, text="Open Chrome", bootstyle="primary",
+            command=lambda: chrome_session.launch_chrome(headless=False)
+        ).pack(side="left", padx=(0, 8))
+        ttkb.Button(
+            btn_row, text="Open Chrome (Headless)", bootstyle="secondary-outline",
+            command=lambda: chrome_session.launch_chrome(headless=True)
+        ).pack(side="left")
 
-        button2 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: threading.Thread(target=login_window).start())
+        step2 = ttkb.Labelframe(self, text="Step 2 - Continue", padding=16)
+        step2.pack(fill="x", pady=(0, 16))
+        ttkb.Button(
+            step2, text="Continue to Dashboard →", bootstyle="success",
+            command=lambda: controller.show_frame(DashboardPage)
+        ).pack(fill="x")
 
-        button3 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: threading.Thread(target=chrome_driver_headless).start())
-
-        exit_program_button = tk.Button(self, text="Exit", font="Times",
-                                        command=lambda: exit_program_function())
-
-        # Text
-        text = tk.Text(self, height=1, width=49, pady=2)
-        text.insert(tk.END, "NOTE: 1st open session, and use whatever u want!")
-
-        # Interface
-        logo_label.grid(row=0, columnspan=2)
-
-        label1.grid(row=1, column=0)
-        button1.grid(row=1, column=1)
-
-        label2.grid(row=2, column=0)
-        button2.grid(row=2, column=1)
-
-        label3.grid(row=3, column=0)
-        button3.grid(row=3, column=1)
-
-        text.grid(row=4, columnspan=2, padx=1, pady=15)
-
-        exit_program_button.grid(row=5, column=1, pady=(0, 10))
-
-        def logged_in_windows():
-            controller.show_frame(SecondPage)
-
-        def login_window():
-            chrome_driver_with_head()
-
-        def chrome_driver_headless():
-            chrome_session.launch_chrome(headless=True)
-
-        def chrome_driver_with_head():
-            chrome_session.launch_chrome(headless=False)
-
-        def exit_program_function():
-            app.destroy()
+        ttkb.Button(
+            self, text="Exit", bootstyle="link", command=controller.destroy
+        ).pack(pady=(8, 0))
 
 
-class SecondPage(tk.Frame):
+class DashboardPage(ttkb.Frame):
+    """Main dashboard: sync follow data, review, and unfollow accounts that don't follow back."""
+
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent, padding=24)
+        self.controller = controller
 
-        # Logo
-        img = Image.open('resource_data/logo.png')
-        # img = img.resize((200, 100))
-        logo = ImageTk.PhotoImage(img)
-        logo_label = tk.Label(self, image=logo)
-        logo_label.image = logo
+        load_logo(self, max_width=200).pack(pady=(0, 8))
+        ttkb.Label(self, text="Dashboard", font=HEADER_FONT).pack(pady=(0, 4))
 
-        # Progress Bar
-        my_progress = ttk.Progressbar(self, orient="horizontal", length=397, mode="determinate")
+        self.status_var = tk.StringVar(value="Not synced yet.")
+        ttkb.Label(
+            self, textvariable=self.status_var, bootstyle="secondary",
+            wraplength=380, justify="center"
+        ).pack(pady=(0, 12))
 
-        # Labels
-        label1 = tk.Label(self, text="Sync Data", font="Times")
-        label2 = tk.Label(self, text="See ppl not following you back", font="Times")
-        label3 = tk.Label(self, text="Unfollow all pl not following you back", font="Times")
+        self.progress = ttkb.Progressbar(self, mode="indeterminate", bootstyle="info-striped")
+        self.progress.pack(fill="x", pady=(0, 16))
 
-        # Buttons
-        button1 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: threading.Thread(target=sync_data).start())
+        actions = ttkb.Frame(self)
+        actions.pack(fill="x", pady=(0, 8))
 
-        button2 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: new_windows())
-        #                    command=lambda: see_not_following_back())
+        self.sync_btn = ttkb.Button(
+            actions, text="Sync Data", bootstyle="primary", command=self.sync_data
+        )
+        self.sync_btn.pack(fill="x", pady=4)
 
-        button3 = tk.Button(self, text="Click Here", font="Times",
-                            command=lambda: threading.Thread(target=unfollow_ppl).start())
+        self.view_btn = ttkb.Button(
+            actions, text="View Accounts Not Following Back", bootstyle="info-outline",
+            command=self.open_unfollowers_window
+        )
+        self.view_btn.pack(fill="x", pady=4)
 
-        back = tk.Button(self, text="Back", font="Times",
-                         command=lambda: back_button_function())
+        self.unfollow_btn = ttkb.Button(
+            actions, text="Unfollow All That Don't Follow Back", bootstyle="danger",
+            command=self.confirm_unfollow_all
+        )
+        self.unfollow_btn.pack(fill="x", pady=4)
 
-        text_box = tk.Text(self, height=5, width=52)
+        bottom = ttkb.Frame(self)
+        bottom.pack(fill="x", pady=(12, 0))
+        ttkb.Button(
+            bottom, text="← Back", bootstyle="secondary-outline",
+            command=lambda: controller.show_frame(SessionPage)
+        ).pack(side="left")
+        ttkb.Button(
+            bottom, text="Exit", bootstyle="link", command=controller.destroy
+        ).pack(side="right")
 
-        exit_program_button = tk.Button(self, text="Exit", font="Times",
-                                        command=lambda: app.destroy())
+        self.refresh_status()
 
-        # Interface
-        logo_label.grid(row=0, columnspan=2)
+    def refresh_status(self):
+        following = count_lines(ACC_YOU_FOLLOW_FILE)
+        followers = count_lines(ACC_FOLLOWING_YOU_FILE)
+        not_back = count_lines(NOT_FOLLOWING_BACK_FILE)
+        if following is None:
+            self.status_var.set("Not synced yet - click Sync Data to get started.")
+        else:
+            self.status_var.set(
+                f"Following {following} - Followed by {followers} - "
+                f"{not_back} don't follow you back"
+            )
 
-        label1.grid(row=1, column=0)
-        button1.grid(row=1, column=1)
+    def set_busy(self, busy, message=None):
+        state = "disabled" if busy else "normal"
+        self.sync_btn.config(state=state)
+        self.view_btn.config(state=state)
+        self.unfollow_btn.config(state=state)
+        if busy:
+            self.progress.start(10)
+        else:
+            self.progress.stop()
+        if message:
+            self.status_var.set(message)
 
-        label2.grid(row=2, column=0)
-        button2.grid(row=2, column=1)
+    def sync_data(self):
+        self.set_busy(True, "Syncing follow data...")
 
-        label3.grid(row=3, column=0)
-        button3.grid(row=3, column=1)
+        def task():
+            try:
+                follow_actions.make_follow_following_data()
+                return None
+            except Exception as e:
+                return e
 
-        my_progress.grid(row=4, columnspan=2, padx=1, pady=15)
+        def done(error):
+            self.set_busy(False)
+            if error:
+                Messagebox.show_error(f"Sync failed: {error}", title=APP_TITLE)
+            self.refresh_status()
 
-        back.grid(row=5, column=0, pady=(0, 10))
+        run_async(self, task, done)
 
-        exit_program_button.grid(row=5, column=1, pady=(0, 10))
+    def confirm_unfollow_all(self):
+        not_back = count_lines(NOT_FOLLOWING_BACK_FILE)
+        if not not_back:
+            Messagebox.show_info("Nothing to unfollow - sync data first.", title=APP_TITLE)
+            return
+        confirmed = Messagebox.yesno(
+            f"Unfollow all {not_back} accounts that don't follow you back?\n"
+            "This performs real actions on Instagram and can't be undone automatically.",
+            title="Confirm bulk unfollow"
+        )
+        if confirmed == "Yes":
+            self.unfollow_all()
 
-        # New Window
-        def new_windows():
-            # global logo_img, logo_label, label1, label2, label3, button1, button2, top
+    def unfollow_all(self):
+        self.set_busy(True, "Unfollowing accounts...")
+        run_async(
+            self, follow_actions.unfollow_people,
+            lambda _: self.set_busy(False, "Done. Sync again to confirm.")
+        )
 
-            top = tk.Toplevel()
-            top.title("Unfollowers")
-
-            # Logo
-            img = Image.open('resource_data/logo.png')
-            # img = img.resize((200, 100))
-            logo = ImageTk.PhotoImage(img)
-            logo_label = tk.Label(top, image=logo)
-            logo_label.image = logo
-
-            # Buttons
-            exit_program_buttonn = tk.Button(top, text="Exit", font="Times",
-                                             command=lambda: top.destroy())
-
-            # Interface
-            logo_label.grid(row=0, column=0, columnspan=4)
-
-            # Create A Main Frame
-            main_frame = tk.Frame(top)
-            main_frame.grid(row=1, column=0, rowspan=4, columnspan=4)
-            # main_frame.pack(fill="both", expand=1)
-
-            # Create A Canvas
-            my_canvas = tk.Canvas(main_frame)
-            my_canvas.grid(row=0, column=0, rowspan=3, columnspan=3, sticky="w")
-            # my_canvas.pack(side="left", fill="both", expand=1)
-
-            # Add A Scrollbar To The Canvas
-            my_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=my_canvas.yview)
-            my_scrollbar.grid(row=1, column=3, sticky="e")
-            # my_scrollbar.pack(side="right", fill="y")
-
-            # Configure The Canvas
-            my_canvas.configure(yscrollcommand=my_scrollbar.set)
-            my_canvas.bind('<Configure>', lambda e: my_canvas.configure(scrollregion=my_canvas.bbox("all")))
-
-            # Create ANOTHER Frame INSIDE the Canvas
-            second_frame = tk.Frame(my_canvas)
-
-            # Add that New frame To a Window In The Canvas
-            my_canvas.create_window((0, 0), window=second_frame, anchor="nw")
-
-            with open(r'synced_data\not_following_back.txt', 'r') as assholes:
-                # global inc_in_progress
-                total_user_names = len(assholes.readlines())
-                # inc_in_progress = 100 / total_user_names
-                assholes.seek(0)
-                gui_line_no = 1
-                for i in range(total_user_names):
-                    user_name = assholes.readline()
-                    user_name_without_newline = user_name[:-1]
-
-                    # Get name V tough, instead make csv file n read from there
-                    """driver.get('https://www.instagram.com/' + user_name_without_newline)
-                    name = driver.find_element_by_xpath('//*[@class="rhpdm"][0]').get_attribute("src")"""
-
-                    name = 'Name'
-                    u_name = tk.Label(second_frame, text=user_name_without_newline, font="Times")
-                    name = tk.Label(second_frame, text=name, font="Times")
-                    # pic = tk.Label(second_frame, text="UserPic", font="Times")
-
-                    # Profile Picture
-                    pic = Image.open('resource_data/demo_profile_pic.png')
-                    # pic = Image.open('Profile Data/'+user_name_without_newline+'.png')
-                    pic = pic.resize((50, 50))
-                    profilepic = ImageTk.PhotoImage(pic)
-                    profilepic_label = tk.Label(second_frame, image=profilepic)
-                    profilepic_label.image = profilepic
-
-                    unfollow_button = tk.Button(second_frame, text="Unfollow", font="Times",
-                                                command=lambda: unfollow_button_by_id())
-
-                    profilepic_label.grid(row=gui_line_no, column=0)
-                    # pic.grid(row=gui_line_no, column=0)
-                    u_name.grid(row=gui_line_no, column=1)
-                    name.grid(row=gui_line_no + 1, column=1, pady=(0, 20))
-                    unfollow_button.grid(row=gui_line_no, column=2, sticky='E')
-
-                    gui_line_no += 2
-
-            # here both rows should be last
-            exit_program_buttonn.grid(row=5, column=2, pady=(0, 10))
-
-        # Functions
-        def back_button_function():
-            controller.show_frame(FirstPage)
-            text_box.destroy()
-
-        def sync_data():
-            my_progress.start(10)
-            follow_actions.make_follow_following_data()
-            my_progress.stop()
-
-        def see_not_following_back():
-            file = open(r'synced_data\not_following_back.txt').read()
-            text_box.grid(row=6, columnspan=2)
-            text_box.insert(tk.END, file)
-
-        def unfollow_ppl():
-            my_progress.start(10)
-            follow_actions.unfollow_people()
-            my_progress.stop()
-
-        def unfollow_button_by_id():
-            pass
+    def open_unfollowers_window(self):
+        if count_lines(NOT_FOLLOWING_BACK_FILE) is None:
+            Messagebox.show_info("Nothing to show yet - sync data first.", title=APP_TITLE)
+            return
+        UnfollowersWindow(self)
 
 
-class Application(tk.Tk):
-    def __init__(self, *args, **kwargs):
-        tk.Tk.__init__(self, *args, **kwargs)
+class UnfollowersWindow(ttkb.Toplevel):
+    """Popup listing accounts that don't follow back, with a per-account unfollow button."""
 
-        # Creating a Window
-        window = tk.Frame(self)
-        window.grid()
+    def __init__(self, parent):
+        super().__init__(title="Accounts Not Following Back")
+        self.geometry("420x520")
 
-        # To specify minimum size of windows irrespective to buttons, labels, logos etc
-        """window.grid_rowconfigure(0, minsize=500)
-        window.grid_columnconfigure(0, minsize=800)"""
+        header = ttkb.Frame(self, padding=(16, 16, 16, 8))
+        header.pack(fill="x")
+        ttkb.Label(header, text="Not Following You Back", font=SECTION_FONT).pack(anchor="w")
+
+        container = ttkb.Frame(self, padding=(16, 0))
+        container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttkb.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        rows_frame = ttkb.Frame(canvas)
+        canvas.create_window((0, 0), window=rows_frame, anchor="nw")
+        rows_frame.bind(
+            '<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        try:
+            with open(NOT_FOLLOWING_BACK_FILE, 'r') as f:
+                usernames = [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            usernames = []
+
+        avatar_img = Image.open('resource_data/demo_profile_pic.png').resize((44, 44))
+        self._avatar_photo = ImageTk.PhotoImage(avatar_img)
+
+        if not usernames:
+            ttkb.Label(rows_frame, text="Nobody here - everyone follows you back!").pack(pady=20)
+
+        for username in usernames:
+            self._build_row(rows_frame, username)
+
+        ttkb.Button(
+            self, text="Close", bootstyle="secondary", command=self.destroy
+        ).pack(pady=12)
+
+    def _build_row(self, parent, username):
+        row = ttkb.Frame(parent, padding=(0, 8))
+        row.pack(fill="x")
+
+        ttkb.Label(row, image=self._avatar_photo).pack(side="left", padx=(0, 10))
+        ttkb.Label(row, text=username, font=(FONT_FAMILY, 10, "bold")).pack(side="left")
+
+        button = ttkb.Button(row, text="Unfollow", bootstyle="danger-outline", width=10)
+        button.config(command=lambda: self._start_unfollow(username, button))
+        button.pack(side="right")
+
+    def _start_unfollow(self, username, button):
+        button.config(state="disabled", text="Working...")
+
+        def task():
+            return follow_actions.unfollow_one(username)
+
+        def done(success):
+            button.config(
+                text="Unfollowed" if success else "Failed",
+                bootstyle="secondary" if success else "danger"
+            )
+
+        run_async(button, task, done)
+
+
+class Application(ttkb.Window):
+    def __init__(self):
+        super().__init__(title=APP_TITLE, themename=THEME, resizable=(False, False))
+        icon_path = 'resource_data/ico.ico'
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
+
+        container = ttkb.Frame(self)
+        container.pack(fill="both", expand=True)
 
         self.frames = {}
-        for F in (FirstPage, SecondPage):
-            frame = F(window, self)
+        for F in (SessionPage, DashboardPage):
+            frame = F(container, self)
             self.frames[F] = frame
             frame.grid(row=0, column=0, sticky="nsew")
 
-        self.show_frame(FirstPage)
+        self.show_frame(SessionPage)
 
     def show_frame(self, page):
-        frame = self.frames[page]
-        frame.tkraise()
-        self.title("Instagram Tool")
-        self.iconbitmap('resource_data/ico.ico')
+        self.frames[page].tkraise()
 
 
-app = Application()
-app.mainloop()
+if __name__ == '__main__':
+    app = Application()
+    app.mainloop()

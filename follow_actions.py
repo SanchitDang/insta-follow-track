@@ -26,22 +26,43 @@ def make_follow_following_data():
                 you_are_not_following_back.write(followers)
 
 
-def unfollow_people():
+def setup_driver():
     options = webdriver.ChromeOptions()
     options.add_experimental_option("debuggerAddress", f"localhost:{DEBUG_PORT}")
+    return webdriver.Chrome(options=options)
 
-    driver = webdriver.Chrome(options=options)
+
+def unfollow_account(driver, user_name):
+    """Unfollow a single account. Returns True if the unfollow succeeded.
+
+    The "Following" button opens a dropdown menu (Mute/Restrict/Unfollow/...)
+    rather than unfollowing directly - both clicks are needed.
+    """
+    try:
+        driver.get('https://www.instagram.com/' + user_name)
+        instagram_scraper.human_delay(1.5, 3.0)
+        following_btn = driver.find_element(By.XPATH, '//div[text()="Following"]/ancestor::button[1]')
+        driver.execute_script("arguments[0].click();", following_btn)
+        instagram_scraper.human_delay(0.8, 1.8)
+        unfollow_item = driver.find_element(By.XPATH, '//*[text()="Unfollow"]')
+        driver.execute_script("arguments[0].click();", unfollow_item)
+        instagram_scraper.human_delay(1.5, 3.0)
+        return True
+    except Exception:
+        return False
+
+
+def unfollow_one(user_name):
+    """Unfollow a single account by username - used by the per-row Unfollow button."""
+    driver = setup_driver()
+    return unfollow_account(driver, user_name)
+
+
+def unfollow_people():
+    driver = setup_driver()
 
     with open(r'synced_data/not_following_back.txt', 'r') as not_following_back_data:
         usernames = [line.strip() for line in not_following_back_data.readlines()]
 
     for user_name in usernames:
-        driver.get('https://www.instagram.com/' + user_name)
-        try:
-            instagram_scraper.human_delay(1.5, 3.0)
-            driver.find_element(By.XPATH, '//span[@aria-label="Following"]').click()
-            instagram_scraper.human_delay(0.8, 1.8)
-            driver.find_element(By.XPATH, '//button[text()="Unfollow"]').click()
-            instagram_scraper.human_delay(1.5, 3.0)
-        except Exception:
-            pass
+        unfollow_account(driver, user_name)
